@@ -1,0 +1,13 @@
+-R theories/ MTranslate
+COQTOP = /Users/kquiri13/.opam/system/bin/coqtop
+COQC = /Users/kquiri13/.opam/system/bin/coqc
+COQDEP = /Users/kquiri13/.opam/system/bin/coqdep
+
+-I src/
+
+src/mTranslate.ml
+src/mTranslate.mllib
+src/g_modal.ml4
+theories/Modal.v
+
+

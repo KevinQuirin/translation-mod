@@ -1,0 +1,15 @@
+-R theories/ MTranslate
+
+COQTOP = /Users/kquiri13/Code/Coq/HoTT8.5/HoTT/hoqtop
+COQC = /Users/kquiri13/Code/Coq/HoTT8.5/HoTT/hoqc
+COQDEP = /Users/kquiri13/Code/Coq/HoTT8.5/HoTT/hoqdep
+
+-I src/
+
+src/mTranslate.ml
+src/mTranslate.mllib
+src/mPlugin.ml
+src/g_modal.ml4
+theories/Modal.v
+
+

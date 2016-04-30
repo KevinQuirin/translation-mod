@@ -1,0 +1,12 @@
+(* -*- coq-prog-name: "/Users/kquiri13/Code/Coq/HoTT8.5/HoTT/hoqtop"; proof-prog-name-ask: nil -*- *)
+
+Require Import MTranslate.Modal.
+Require Import HoTT.
+
+Module Test (Mod:Modalities).
+Export Mod.
+
+Goal forall (O:Modality) (A:Type) (x:forall y:Bool, Unit) (z:Bool), True.
+  intros O A.
+  one_constr of Type.
+  
