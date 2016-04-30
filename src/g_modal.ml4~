@@ -1,9 +1,0 @@
-DECLARE PLUGIN "mTranslate"
-
-TACTIC EXTEND number_constr_inductive
-| [ "one_constr" "of" constr(c) ] -> [
-    Proofview.Goal.enter begin fun gl ->
-      MTranslate.inductive_with_one_constr gl c
-  end 
-]		      
-END
