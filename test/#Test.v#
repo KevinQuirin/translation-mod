@@ -3,6 +3,18 @@
 Require Import MTranslate.Modal.
 Require Import HoTT.
 
+Set Universe Polymorphism.
+Set Primitive Projections.
+
+Let Refl := idmap : Type -> Type.
+Let Univ := Type.
+Let U2U := idmap : Type -> Type.
+Let Forall := (fun (A:Type) (B:A -> Type) => forall x:A, B x).
+Let Unit := Unit.
+
+
+Modal Definition foo : Type using Refl Univ U2U Forall Unit.
+
 Module Test (Mod:Modalities) (Acc:Accessible_Modalities Mod).
   Export Mod.
   Module Export Acc_Theory := Accessible_Modalities_Theory Mod Acc.
@@ -17,8 +29,20 @@ Module Test (Mod:Modalities) (Acc:Accessible_Modalities Mod).
   Context `{ua: Univalence}.
   Context `{fs: Funext}.
 
-  Let In' (O:Modality) : Type -> Type := In O.
-  Let MType (O:Modality) := {x : Type & In' O x}.
+  Context `{O:Modality}.
+  
+  Let Reflector  := O_reflector O.
+  Let In'  : Type -> Type := In O.
+  Let MType  := {x : Type & In' x}.
+  Let U2U  := (pr1:MType -> Type).
+  Let Forall  := (fun (A:MType) (B:A.1 -> MType) =>
+                                ((forall x:A.1, (B x).1; inO_forall O A.1 (pr1 o B) (pr2 o B))): MType).
+  Let OUnit  := ((Unit; inO_unit O) : MType).
+  
+  Modal Definition foo : Type using Reflector MType U2U Forall OUnit.
+
+  
+  
 
   Ltac _modal O X id :=
     modal
@@ -31,16 +55,25 @@ Module Test (Mod:Modalities) (Acc:Accessible_Modalities Mod).
       X
     as id.
 
+  Ltac __modal O X :=
+    modal_
+      (fun A:Type => ((O A; @O_inO O A): MType O))
+      ((MType O; inO_typeO O): MType O)
+      (pr1:MType O -> Type)
+      (fun (A:MType O) (B:A.1 -> MType O) =>
+         ((forall x:A.1, (B x).1; inO_forall O A.1 (pr1 o B) (pr2 o B))): MType O)
+      ((Unit; inO_unit O) : MType O)
+      X.
+
+      
   Goal forall (O:Modality) (A:Type) (x:A), True.
     intros O A x.
-    _modal O Unit OUnit.
-    pose (T := Bool).
-    _modal O T OT. subst T.
+    _modal O Unit OUnit. cbn in *.    
     _modal O Bool OBool. cbn in OBool.
-    _modal O Bool_rec.
-    _modal O true.
-    _modal O x.
-    _modal O Empty. cbn in *.
+    _modal O x Ox.
+    _modal O (forall X:Type, X) Ofoo. cbn in *.
+    __modal O (forall x:Type, x -> x).    
+    _modal O Empty Oempty. cbn in *.
     _modal O Unit. cbn in *.
     _modal O nat. cbn in *.
     _modal O Type.

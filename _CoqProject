@@ -7,8 +7,10 @@ COQDEP = /Users/kquiri13/Code/Coq/HoTT8.5/HoTT/hoqdep
 -I src/
 
 src/mTranslate.ml
+src/mTranslate.mli
 src/mTranslate.mllib
 src/mPlugin.ml
+src/mPlugin.mli
 src/g_modal.ml4
 theories/Modal.v
 
