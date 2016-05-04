@@ -14,67 +14,71 @@ type modality = {
   }
 
 type translator = global_reference Refmap.t
+exception MissingGlobal of global_reference
 
-(* (\* Check if the type c is inductive, and if it is, if it has exactly one constructor *\) *)
-(* let inductive_with_one_constr env c = *)
-(*   match kind_of_term c with *)
-(*   |Ind (ind,_) -> *)
-(*       let _, oib = Inductive.lookup_mind_specif env ind in *)
-(*       let nc = Array.length oib.mind_consnames in *)
-(*       if nc = 1 then true else false *)
-(*   |_ -> false *)
+type forcing_context = {
+    (* context : forcing_condition list; *)
+    (** Forcing contexts are flagging variables of the rel_context in the same
+    order. We statically know that variables coming from the introduction of
+    a forcing condition come by pairs: the first one is a level, the second one
+    a morphism. There is therefore only [Lift] condition for such pairs. *)
+    modal : modality;
+    (** Underlying category *)
+    translator : translator;
+    (** A map associating to all source constant a forced constant *)
+  }
 
-(* let inductive_with_one_constr gl c = *)
-(*   let env = Proofview.Goal.env gl in *)
-(*   let b = inductive_with_one_constr env c in *)
-(*   if isInd c *)
-(*   then begin *)
-(*       if b then begin *)
-(* 	Pp.msg_info (Pp.str ("Inductive has one constructor")); *)
-(* 	Proofview.tclUNIT() *)
-(*       end *)
-(*     else begin *)
-(* 	Pp.msg_info (Pp.str ("Inductive has not one constructor")); *)
-(* 	Proofview.tclUNIT() *)
-(* 	end *)
-(*     end *)
-(*   else begin *)
-(*       Pp.msg_info (Pp.str ("This is not an inductive type")); *)
-(*       Proofview.tclUNIT() *)
-(*     end *)
-    
+let apply_global env sigma gr u fctx =
+  (** FIXME *)
+  let p' =
+    try Refmap.find gr fctx.translator
+    with Not_found -> raise (MissingGlobal gr)
+  in
+  let (sigma, c) = Evd.fresh_global env sigma p' in
+  match gr with
+  | IndRef _ -> assert false
+  | _ -> (c, sigma)
 
-
-let rec translate modal env sigma c =
+let rec translate modal env fctx sigma c =
   match kind_of_term c with
   | Rel n ->
-  (mkRel n, sigma)
-     (* assert false *)
+     (mkRel n, sigma)
+  (* assert false *)
   | Var id ->
-  (mkVar id, sigma)
-     (* assert false *)
-  | Sort s -> (modal.mod_univ, sigma)
+     apply_global env sigma (VarRef id) Univ.Instance.empty fctx
+     (* (mkVar id, sigma) *)
+  (* assert false *)
+  | Sort s ->
+     let (sigma, s') =
+       if Sorts.is_prop s then (sigma, Sorts.prop)
+       else Evd.new_sort_variable Evd.univ_flexible sigma
+     in
+     let sigma = Evd.set_leq_sort env sigma s s' in
+     (modal.mod_univ, sigma)
   | Cast (c, k, t) -> assert false
   | Prod (na, t, u) ->
-     let (mt, sigma) = (translate modal env sigma t) in (* Translation of t *)
-     let (mu, sigma) = (translate modal env sigma u) in (* Translation of u *)
+     let (mt, sigma) = (translate modal env fctx sigma t) in (* Translation of t *)
+     let (mu, sigma) = (translate modal env fctx sigma u) in (* Translation of u *)
+     let mt1 = mkApp (modal.mod_univ_to_univ, [|mt|]) in
+     let mu1 = mkApp (modal.mod_univ_to_univ, [|mu|]) in
+     (* (ans,sigma) *)     
      (mkApp (modal.mod_forall,
-	    [| mt ; mkLambda (na, mkApp(modal.mod_univ_to_univ, [|mt|]), mu) |]
-	   ), sigma)
+	     [| mt ; mkLambda (na, mt1, mu) |]
+	    ), sigma)
   | Lambda (na, t, u) ->
-     let (mt,sigma) = (translate modal env sigma t) in (* Translation of t *)
-     let (mu,sigma) = (translate modal env sigma u) in (* Translation of u *)
+     let (mt,sigma) = (translate modal env fctx sigma t) in (* Translation of t *)
+     let (mu,sigma) = (translate modal env fctx sigma u) in (* Translation of u *)
      let mt = mkApp(modal.mod_univ_to_univ, [|mt|]) in (* π1 mt *) 
      (mkLambda (na,mt,mu), sigma)
-     (* assert false *)
+  (* assert false *)
   | LetIn (na, c, t, u) ->
-  (* mkLetIn (na, translate modal env c, translate modal env t, translate modal env u) *)
+     (* mkLetIn (na, translate modal env c, translate modal env t, translate modal env u) *)
      assert false
   | App (t, args) ->
-     let (mt,sigma) = (translate modal env sigma t) in (* Translation of t *)
-     let margs = Array.map fst (Array.map (translate modal env sigma) args) in (* Translation of arguments *)
+     let (mt,sigma) = (translate modal env fctx sigma t) in (* Translation of t *)
+     let margs = Array.map fst (Array.map (translate modal env fctx sigma) args) in (* Translation of arguments *)
      (mkApp (mt, margs), sigma)
-     (* assert false *)
+  (* assert false *)
   | Const pc -> assert false
   | Ind (ind,i) ->
      let _, oib = Inductive.lookup_mind_specif env ind in
@@ -82,7 +86,8 @@ let rec translate modal env sigma c =
      if ("Unit" = name) then
        (modal.mod_unit, sigma)
      else
-       (mkApp(modal.mod_O, [|mkIndU (ind,i)|]),sigma)
+       let mind = mkIndU (ind,i) in
+       (mkApp(modal.mod_O, [|mind|]),sigma)
   | Construct pc -> assert false
   | Case (ci, c, r, p) -> assert false
   | Fix f -> assert false
@@ -91,6 +96,6 @@ let rec translate modal env sigma c =
   | Meta _ -> assert false
   | Evar _ -> assert false
 
-and translate_type modal env sigma t =
-  let (sigma, mt) = translate modal env sigma t in
-  (sigma, mt)
+and translate_type modal env fctx sigma t =
+  let (mt,sigma) = translate modal env fctx sigma t in
+  (mt,sigma)

@@ -6,6 +6,35 @@ Require Import HoTT.
 Set Universe Polymorphism.
 Set Primitive Projections.
 
+(* Set Printing Universes. *)
+
+Definition Univ := Type.
+Definition Refl := fun T:Type => T:Univ.
+Definition U2U := fun T:Univ => T:Type.
+Definition Forall := fun (A:Univ) (B:U2U A -> Univ) => ((forall x:U2U A, U2U (B x)) : Univ).
+Definition OUnit := Unit : Univ.
+
+Ltac _modal X id := modal Refl Univ U2U Forall OUnit X as id.
+
+Goal True.
+  _modal Bool OBool. cbn in *. unfold Refl in OBool.
+  _modal Type OType. cbn in *. unfold Univ in OType.
+  _modal (Type -> Type) Of. cbn in Of.
+  exact tt.
+Qed.
+
+(* Modal Definition foo: Bool using Refl Univ U2U Forall OUnit. *)
+(* Proof. *)
+(*   unfold U2U, Univ, Refl. cbn. *)
+(*   exact true. *)
+  
+(* Defined. *)
+(* (*   refine (exist _ _ _). *) *)
+(*   exact (Unit;tt). *)
+  
+(*   exact true. *)
+(* Qed. *)
+
 Module Test (Mod:Modalities) (Acc:Accessible_Modalities Mod).
   Export Mod.
   Module Export Acc_Theory := Accessible_Modalities_Theory Mod Acc.
@@ -20,21 +49,40 @@ Module Test (Mod:Modalities) (Acc:Accessible_Modalities Mod).
   Context `{ua: Univalence}.
   Context `{fs: Funext}.
 
-  Context `{O:Modality}.
-  
-  Let Reflector  := O_reflector O.
-  Let In'  : Type -> Type := In O.
-  Let MType  := {x : Type & In' x}.
-  Let U2U  := (pr1:MType -> Type).
+
+  (* Let In' (O:Modality) : Type -> Type := In O. *)
+  (* Let MType (O:Modality) := {x : Type & In' O x}. *)
+
+  Context {O:Modality}.
+  Let Reflector  := fun X => (O_reflector O X; @O_inO O X).
+  Let MType := Type_ O.
+  Let TypeO := ((MType; inO_typeO O): Type_ O).
+  Let U2U  := (pr1:Type_ O -> Type).
   Let Forall  := (fun (A:MType) (B:A.1 -> MType) =>
                                 ((forall x:A.1, (B x).1; inO_forall O A.1 (pr1 o B) (pr2 o B))): MType).
-  Let OUnit  := ((Unit; inO_unit O) : MType).
-  
-  Modal Definition foo : forall X:Type, X as foo' using Reflector MType U2U Forall OUnit.
+  Let OUnit  := ((Unit; inO_unit O) : Type_ O).
 
+  Modal Definition foo :Type using Reflector TypeO U2U Forall OUnit.
+  unfold TypeO, U2U, MType. cbn.
+  exact OUnit.
+  exact tt.
+  Defined.
+  exact (O_functor O idmap).
+  (* exact OUnit. *)
+  Print MType. Print Type_.
+  Defined.
   
+  apply to. exact true.
+  Defined.
+  exact tt.
+  Defined.
+  Show Universes.
+  exists Type.
+  exists Unit.
+  (* exact tt. *)
   
-
+                            
+  
   Ltac _modal O X id :=
     modal
       (fun A:Type => ((O A; @O_inO O A): MType O))
@@ -59,11 +107,12 @@ Module Test (Mod:Modalities) (Acc:Accessible_Modalities Mod).
       
   Goal forall (O:Modality) (A:Type) (x:A), True.
     intros O A x.
-    _modal O Unit OUnit. cbn in *.    
-    _modal O Bool OBool. cbn in OBool.
+       
     _modal O x Ox.
+    (* Set Printing Universes. *)
     _modal O (forall X:Type, X) Ofoo. cbn in *.
-    __modal O (forall x:Type, x -> x).    
+    _modal O (fun (X:Type) => X) Ofooo. cbn in *.
+    _modal O (forall x:Type, x -> x) Obar.    
     _modal O Empty Oempty. cbn in *.
     _modal O Unit. cbn in *.
     _modal O nat. cbn in *.
