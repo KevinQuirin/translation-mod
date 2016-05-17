@@ -23,17 +23,20 @@ Goal True.
   exact tt.
 Qed.
 
-(* Modal Definition foo: Bool using Refl Univ U2U Forall OUnit. *)
-(* Proof. *)
-(*   unfold U2U, Univ, Refl. cbn. *)
-(*   exact true. *)
-  
+Modal Definition foo: Bool using Refl Univ U2U Forall OUnit.
+Proof.
+  unfold U2U, Univ, Refl. cbn.
+  exact true.
+Abort.
+(*
+Error: Illegal application: 
+The term "U2U" of type "Univ -> Type"
+cannot be applied to the term
+ "Refl Bool" : "Univ"
+This term has type "Univ@{Top.303}" which should be coercible to
+ "Univ@{Top.297}".
+*)
 (* Defined. *)
-(* (*   refine (exist _ _ _). *) *)
-(*   exact (Unit;tt). *)
-  
-(*   exact true. *)
-(* Qed. *)
 
 Module Test (Mod:Modalities) (Acc:Accessible_Modalities Mod).
   Export Mod.
@@ -49,39 +52,8 @@ Module Test (Mod:Modalities) (Acc:Accessible_Modalities Mod).
   Context `{ua: Univalence}.
   Context `{fs: Funext}.
 
-
-  (* Let In' (O:Modality) : Type -> Type := In O. *)
-  (* Let MType (O:Modality) := {x : Type & In' O x}. *)
-
-  Context {O:Modality}.
-  Let Reflector  := fun X => (O_reflector O X; @O_inO O X).
-  Let MType := Type_ O.
-  Let TypeO := ((MType; inO_typeO O): Type_ O).
-  Let U2U  := (pr1:Type_ O -> Type).
-  Let Forall  := (fun (A:MType) (B:A.1 -> MType) =>
-                                ((forall x:A.1, (B x).1; inO_forall O A.1 (pr1 o B) (pr2 o B))): MType).
-  Let OUnit  := ((Unit; inO_unit O) : Type_ O).
-
-  Modal Definition foo :Type using Reflector TypeO U2U Forall OUnit.
-  unfold TypeO, U2U, MType. cbn.
-  exact OUnit.
-  exact tt.
-  Defined.
-  exact (O_functor O idmap).
-  (* exact OUnit. *)
-  Print MType. Print Type_.
-  Defined.
-  
-  apply to. exact true.
-  Defined.
-  exact tt.
-  Defined.
-  Show Universes.
-  exists Type.
-  exists Unit.
-  (* exact tt. *)
-  
-                            
+  Let In' (O:Modality) : Type -> Type := In O.
+  Let MType (O:Modality) := {x : Type & In' O x}.
   
   Ltac _modal O X id :=
     modal
@@ -106,22 +78,36 @@ Module Test (Mod:Modalities) (Acc:Accessible_Modalities Mod).
 
       
   Goal forall (O:Modality) (A:Type) (x:A), True.
-    intros O A x.
-       
-    _modal O x Ox.
-    (* Set Printing Universes. *)
-    _modal O (forall X:Type, X) Ofoo. cbn in *.
-    _modal O (fun (X:Type) => X) Ofooo. cbn in *.
-    _modal O (forall x:Type, x -> x) Obar.    
+    intros O A x.       
     _modal O Empty Oempty. cbn in *.
-    _modal O Unit. cbn in *.
-    _modal O nat. cbn in *.
-    _modal O Type.
-    _modal O (Type -> Type). cbn in *. 
-    _modal O (forall x:Type, x). cbn in *.
-    _modal O (forall x:Type, x -> x).
-    _modal O ((fun x:Type => x) Type).
-    
-    _modal O (forall x:Type, Type -> x).
-    _modal O ((fun x:Type => x) Type).
+    __modal O Unit. cbn in *.
+    __modal O nat. cbn in *.
+    __modal O Type.
+    __modal O (Type -> Type). cbn in *. 
+    __modal O (forall x:Type, x). cbn in *.
+    (* __modal O (forall x:Type, x -> x). *) 
+    (* __modal O ((fun x:Type => x) Type). *)
+    (* __modal O (forall x:Type, Type -> x). *)
+    (* __modal O ((fun x:Type => x) Type). *)
+  Abort.
+
+    Context {O:Modality}.
+  Let Reflector  := fun X => (O_reflector O X; @O_inO O X).
+  (* Let MType := Type_ O. *)
+  Let TypeO := ((Type_ O; inO_typeO O): Type_ O).
+  Let U2U  := (pr1:Type_ O -> Type).
+  Let Forall  := (fun (A:Type_ O) (B:A.1 -> Type_ O) =>
+                                ((forall x:A.1, (B x).1; inO_forall O A.1 (pr1 o B) (pr2 o B))): Type_ O).
+  Let OUnit  := ((Unit; inO_unit O) : Type_ O).
+
+  
+
+  Modal Definition foo :Type using Reflector TypeO U2U Forall OUnit.
+  unfold TypeO, U2U, MType. cbn.
+  (* exact OUnit. *)
+  (*
+    Anomaly: File "pretyping/evd.ml", line 407, characters 15-21: Assertion failed.
+    Please report.
+   *)
+  Abort.
         
