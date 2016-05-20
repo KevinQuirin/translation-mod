@@ -1,7 +1,7 @@
 DECLARE PLUGIN "mTranslate"
 
 TACTIC EXTEND modal
-| [ "modal" constr(refl) constr(univ) constr(univ_to_univ) constr(forall) constr(unit) constr(c) "as" ident(id)] -> [
+| [ "modal" reference(refl) reference(univ) reference(univ_to_univ) reference(forall) reference(unit) constr(c) "as" ident(id)] -> [
   let modality = {
       MTranslate.mod_O = refl;
       MTranslate.mod_univ = univ;
@@ -12,7 +12,7 @@ TACTIC EXTEND modal
   in	
   MPlugin.modal_tac_named modality c id
 ]
-| [ "modal_" constr(refl) constr(univ) constr(univ_to_univ) constr(forall) constr(unit) constr(c)] -> [
+| [ "modal_" reference(refl) reference(univ) reference(univ_to_univ) reference(forall) reference(unit) constr(c)] -> [
   let modality = {
       MTranslate.mod_O = refl;
       MTranslate.mod_univ = univ;

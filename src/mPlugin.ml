@@ -12,11 +12,10 @@ open Proofview.Notations
 
 let translate_name id =
   let id = Id.to_string id in
-  Id.of_string (id^"¤" )
+  Id.of_string (id^"modal" )
 
 (* (\** Record of translation between globals *\) *)
 
-	       
 let translator : MTranslate.translator ref =
   Summary.ref ~name:"Modal Global Table" Refmap.empty
 
@@ -24,7 +23,7 @@ type translator_obj = (global_reference * global_reference) list
 
 let add_translator translator l =
   List.fold_left (fun accu (src, dst) -> Refmap.add src dst accu) translator l
-							    
+
 let cache_translator (_, l) =
   translator := add_translator !translator l
 
@@ -74,16 +73,11 @@ let modal_tac_named modal c id =
 let modal_implement (reflector, univ, univ_to_univ, forall, unit) id typ idopt =
   let env = Global.env () in
   let sigma = Evd.from_env env in
-  let (reflector,sigma_) = Universes.fresh_global_instance env (Nametab.global reflector) in
-  let sigma = Evd.merge_context_set Evd.univ_flexible_alg sigma sigma_ in
-  let (univ,sigma_) = Universes.fresh_global_instance env (Nametab.global univ) in
-  let sigma = Evd.merge_context_set Evd.univ_flexible_alg sigma sigma_ in
-  let (univ_to_univ,sigma_) = Universes.fresh_global_instance env (Nametab.global univ_to_univ) in
-  let sigma = Evd.merge_context_set Evd.univ_flexible_alg sigma sigma_ in
-  let (forall,sigma_) = Universes.fresh_global_instance env (Nametab.global forall) in
-  let sigma = Evd.merge_context_set Evd.univ_flexible_alg sigma sigma_ in
-  let (unit,sigma_) = Universes.fresh_global_instance env (Nametab.global unit) in
-  let sigma = Evd.merge_context_set Evd.univ_flexible_alg sigma sigma_ in
+  let reflector = Nametab.global reflector in
+  let univ = Nametab.global univ in
+  let univ_to_univ = Nametab.global univ_to_univ in
+  let forall = Nametab.global forall in
+  let unit = Nametab.global unit in
   let modal = {
     MTranslate.mod_O = reflector;
     MTranslate.mod_univ = univ;
@@ -95,12 +89,11 @@ let modal_implement (reflector, univ, univ_to_univ, forall, unit) id typ idopt =
   | None -> translate_name id
   | Some id -> id
   in
-  let kind = Global, false, DefinitionBody Definition in
+  let kind = Global, Flags.use_polymorphic_flag (), DefinitionBody Definition in
   let (typ, uctx) = Constrintern.interp_type env sigma typ in
   let sigma = Evd.from_ctx uctx in
   let fctx = { MTranslate.modal = modal; MTranslate.translator = !translator } in
   let (typ_,sigma) = MTranslate.translate_type modal env fctx sigma typ in
-  let (sigma, _) = Typing.type_of env sigma typ_ in
   let hook _ dst =
     (** Declare the original term as an axiom *)
     let param = (None, false, (typ, Evd.evar_context_universe_context uctx), None) in
@@ -110,16 +103,18 @@ let modal_implement (reflector, univ, univ_to_univ, forall, unit) id typ idopt =
     Lib.add_anonymous_leaf (in_translator [ConstRef cst, dst])
   in
   let hook ctx = Lemmas.mk_hook hook in
+  let sigma, univtouniv = Evarutil.new_global sigma univ_to_univ in
+  let typ_ = mkApp (univtouniv, [|typ_|]) in
   let sigma, _ = Typing.type_of env sigma typ_ in
-  let typ_ = mkApp (univ_to_univ, [|typ_|]) in
   let () = Lemmas.start_proof_univs id_ kind sigma typ_ hook in
   ()
 
 (** Error handling *)
 
-let _ = register_handler begin function
-			   | MTranslate.MissingGlobal gr ->
-			      let ref = Nametab.shortest_qualid_of_global Id.Set.empty gr in
-			      str "No modal translation for global " ++ Libnames.pr_qualid ref ++ str "."
-			   | _ -> raise Unhandled
+let _ = register_handler
+	begin function
+	| MTranslate.MissingGlobal gr ->
+	   let ref = Nametab.shortest_qualid_of_global Id.Set.empty gr in
+	   str "No modal translation for global " ++ Libnames.pr_qualid ref ++ str "."
+	| _ -> raise Unhandled
 end

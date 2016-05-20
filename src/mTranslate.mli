@@ -1,11 +1,11 @@
 open Globnames
 
 type modality = {
-    mod_O : Constr.t;
-    mod_univ : Constr.t;
-    mod_univ_to_univ : Constr.t;
-    mod_forall : Constr.t;
-    mod_unit : Constr.t;
+    mod_O : global_reference;
+    mod_univ : global_reference;
+    mod_univ_to_univ : global_reference;
+    mod_forall : global_reference;
+    mod_unit : global_reference;
   }
 
 type translator = global_reference Refmap.t

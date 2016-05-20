@@ -1,8 +1,8 @@
 -R theories/ MTranslate
 
-COQTOP = /Users/kquiri13/Code/Coq/HoTT8.5/HoTT/hoqtop
-COQC = /Users/kquiri13/Code/Coq/HoTT8.5/HoTT/hoqc
-COQDEP = /Users/kquiri13/Code/Coq/HoTT8.5/HoTT/hoqdep
+COQTOP = ${HOTTBIN)/hoqtop
+COQC = ${HOTTBIN}/hoqc
+COQDEP = ${HOTTBIN}/hoqdep
 
 -I src/
 
