@@ -1,5 +1,3 @@
-(* -*- coq-prog-name: "/Users/kquiri13/Code/Coq/HoTT8.5/HoTT/hoqtop"; proof-prog-name-ask: nil -*- *)
-
 Require Import MTranslate.Modal.
 Require Import HoTT.
 
@@ -77,19 +75,19 @@ Module Test (Mod:Modalities) (Acc:Accessible_Modalities Mod).
       X.
 
       
-  Goal forall (O:Modality) (A:Type) (x:A), True.
-    intros O A x.       
-    _modal O Empty Oempty. cbn in *.
-    __modal O Unit. cbn in *.
-    __modal O nat. cbn in *.
-    __modal O Type.
-    __modal O (Type -> Type). cbn in *. 
-    __modal O (forall x:Type, x). cbn in *.
-    (* __modal O (forall x:Type, x -> x). *) 
-    (* __modal O ((fun x:Type => x) Type). *)
-    (* __modal O (forall x:Type, Type -> x). *)
-    (* __modal O ((fun x:Type => x) Type). *)
-  Abort.
+  (* Goal forall (O:Modality) (A:Type) (x:A), True. *)
+  (*   intros O A x.        *)
+  (*   _modal O Empty Oempty. cbn in *. *)
+  (*   __modal O Unit. cbn in *. *)
+  (*   __modal O nat. cbn in *. *)
+  (*   __modal O Type. *)
+  (*   __modal O (Type -> Type). cbn in *.  *)
+  (*   __modal O (forall x:Type, x). cbn in *. *)
+  (*   (* __modal O (forall x:Type, x -> x). *)  *)
+  (*   (* __modal O ((fun x:Type => x) Type). *) *)
+  (*   (* __modal O (forall x:Type, Type -> x). *) *)
+  (*   (* __modal O ((fun x:Type => x) Type). *) *)
+  (* Abort. *)
 
     Context {O:Modality}.
   Let Reflector  := fun X => (O_reflector O X; @O_inO O X).
@@ -101,11 +99,13 @@ Module Test (Mod:Modalities) (Acc:Accessible_Modalities Mod).
   Let OUnit  := ((Unit; inO_unit O) : Type_ O).
 
   
-
-  Modal Definition foo :Type using Reflector TypeO U2U Forall OUnit.
-  unfold TypeO, U2U, MType. cbn.
-  (* exact OUnit. *)
-  (*
+  (* Set Printing All. *)
+  (* Set Printing Universes. *)
+  Polymorphic Modal Definition foo :Type using Reflector TypeO U2U Forall OUnit.
+    unfold TypeO, U2U, MType. cbn.
+    apply OUnit.
+  Qed.
+Check foomodal.  (*
     Anomaly: File "pretyping/evd.ml", line 407, characters 15-21: Assertion failed.
     Please report.
    *)

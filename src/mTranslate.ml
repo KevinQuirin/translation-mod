@@ -6,11 +6,11 @@ open Globnames
 open Pp
 
 type modality = {
-    mod_O : Constr.t;
-    mod_univ : Constr.t;
-    mod_univ_to_univ : Constr.t;
-    mod_forall : Constr.t;
-    mod_unit : Constr.t;
+    mod_O : global_reference;
+    mod_univ : global_reference;
+    mod_univ_to_univ : global_reference;
+    mod_forall : global_reference;
+    mod_unit : global_reference;
   }
 
 type translator = global_reference Refmap.t
@@ -54,21 +54,23 @@ let rec translate modal env fctx sigma c =
        else Evd.new_sort_variable Evd.univ_flexible sigma
      in
      let sigma = Evd.set_leq_sort env sigma s s' in
-     (modal.mod_univ, sigma)
+     let sigma, moduniv = Evarutil.new_global sigma modal.mod_univ in
+     (moduniv, sigma)
   | Cast (c, k, t) -> assert false
   | Prod (na, t, u) ->
      let (mt, sigma) = (translate modal env fctx sigma t) in (* Translation of t *)
      let (mu, sigma) = (translate modal env fctx sigma u) in (* Translation of u *)
-     let mt1 = mkApp (modal.mod_univ_to_univ, [|mt|]) in
-     let mu1 = mkApp (modal.mod_univ_to_univ, [|mu|]) in
-     (* (ans,sigma) *)     
-     (mkApp (modal.mod_forall,
-	     [| mt ; mkLambda (na, mt1, mu) |]
-	    ), sigma)
+     let sigma, moduniv1 = Evarutil.new_global sigma modal.mod_univ_to_univ in
+     let sigma, moduniv2 = Evarutil.new_global sigma modal.mod_univ_to_univ in
+     let mt1 = mkApp (moduniv1, [|mt|]) in
+     let mu1 = mkApp (moduniv2, [|mu|]) in
+     let sigma, modall = Evarutil.new_global sigma modal.mod_forall in
+     (mkApp (modall, [| mt ; mkLambda (na, mt1, mu) |]), sigma)
   | Lambda (na, t, u) ->
      let (mt,sigma) = (translate modal env fctx sigma t) in (* Translation of t *)
      let (mu,sigma) = (translate modal env fctx sigma u) in (* Translation of u *)
-     let mt = mkApp(modal.mod_univ_to_univ, [|mt|]) in (* π1 mt *) 
+     let sigma, modunivtouniv = Evarutil.new_global sigma modal.mod_univ_to_univ in
+     let mt = mkApp(modunivtouniv, [|mt|]) in (* π1 mt *) 
      (mkLambda (na,mt,mu), sigma)
   (* assert false *)
   | LetIn (na, c, t, u) ->
@@ -84,10 +86,12 @@ let rec translate modal env fctx sigma c =
      let _, oib = Inductive.lookup_mind_specif env ind in
      let name = Id.to_string oib.mind_typename in
      if ("Unit" = name) then
-       (modal.mod_unit, sigma)
+       let sigma, modunit = Evarutil.new_global sigma modal.mod_unit in
+       (modunit, sigma)
      else
        let mind = mkIndU (ind,i) in
-       (mkApp(modal.mod_O, [|mind|]),sigma)
+       let sigma, modo = Evarutil.new_global sigma modal.mod_O in
+       (mkApp(modo, [|mind|]),sigma)
   | Construct pc -> assert false
   | Case (ci, c, r, p) -> assert false
   | Fix f -> assert false
