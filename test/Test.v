@@ -62,12 +62,27 @@ Module Test (Mod:Modalities) (Acc:Accessible_Modalities Mod).
 
   (* Set Printing Universes. *)
 
+  Definition X := tt : Unit.
+  
   Modal Translate Bool using Reflector Eta TypeO U2U Forall OUnit OPath.
+
+  Inductive foo : Type :=
+  |zero : foo
+  |suc : Unit ->  foo.
+      
+
+  Modal Translate foo using Reflector Eta TypeO U2U Forall OUnit OPath.
+  
+  
+  Modal Translate sum using Reflector Eta TypeO U2U Forall OUnit OPath.
 
   Modal Definition negb : Bool -> Bool using Reflector Eta TypeO U2U Forall OUnit OPath.
   Proof.
     cbn.
-    refine (O_functor _ _). exact negb.
+    refine (O_functor _ _).
+    
+    
+    exact negb.
   Defined.
   
   Modal Definition sum : forall (A B:Type), Type using Reflector Eta TypeO U2U Forall OUnit OPath.

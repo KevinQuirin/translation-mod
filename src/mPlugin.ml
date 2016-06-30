@@ -129,8 +129,148 @@ let get_mind_globrefs mind =
   let l = List.mapi map (Array.to_list mib.mind_packets) in
   List.flatten l
 
+let modal_translate_ind_one modal env ids substind invsubst params ind (sigma,acc) =
+  let fctx = { MTranslate.modal = modal; MTranslate.translator = !translator } in
+  let open Declarations in
+  let open Entries in
+  let (sigma, s) =
+    if List.mem Sorts.InType ind.mind_kelim then Evarutil.new_Type env sigma
+    else (sigma, mkProp)
+  in
+  let nparams = List.length params in
+  let (sigma, arity) =
+    (** On obtient l'arité de l'inductif en traduisant le type de chaque indice
+          i.e : si I ... : (i1 : A1),...,(in : An),s alors l'arité traduite 
+          est (i1 : [A1])...(in : [An]), s *)
+    let nindexes = List.length ind.mind_arity_ctxt - nparams in
+    let ctx = List.firstn nindexes ind.mind_arity_ctxt in
+    let env' = Environ.push_rel_context params env in
+    let a = it_mkProd_or_LetIn s ctx in
+    let (a,sigma) = MTranslate.translate_type env' fctx sigma a in
+    (** En traduisant le type, le codomaine a aussi été traduit. On le remplace par le codomaine
+          originel *)
+    let (a, _) = decompose_prod_n nindexes a in 
+    (sigma, compose_prod a s)
+  in
+  let typename = ind.mind_typename in
+  let consnames = ind.mind_consnames in
+  let translate_names id =
+    let id = Id.to_string id in
+    Id.of_string (id^"_m" )
+  in
+  let name_m, consnames_m = match ids with
+    | None ->
+       (translate_names typename, CArray.map_to_list translate_names consnames)
+    | Some ids when List.length ids = Array.length consnames + 1 ->
+       (List.hd ids, List.tl ids)
+    | _ ->
+       error "Not the right number of provided names"
+  in
+  let user_lc = ind.mind_user_lc in
+  (* for i=0 to (Array.length user_lc -1) do *)
+    (* msg_info (Termops.print_constr user_lc.(i)) *)
+  (* done; *)
+  let fold_lc (sigma, lc_) typ =
+    let (u,sigma) = MTranslate.translate env fctx sigma typ in
+    (sigma, u :: lc_)
+    
+    (* let typ_,s = decompose_prod typ in *)
+    (* let typ_ = Array.of_list typ_ in *)
+    (* let f (x,u) sigma = *)
+    (*   let (u,sigma) = MTranslate.translate_type env fctx sigma u in *)
+    (*   ((x,u),sigma) *)
+    (* in *)
+    (* let (typ_,sigma) = CArray.fold_map' f typ_ sigma in *)
+    (* let typ_ = Array.to_list typ_ in *)
+    (* let typ_ = compose_prod typ_ s in *)
+    (* (sigma, typ_ :: lc_) *)
+  in
+  let (sigma, lc_) = Array.fold_left fold_lc (sigma, []) user_lc in
+
+  (* for i=0 to (Array.length (Array.of_list lc_) -1) do *)
+    (* msg_info (Termops.print_constr (Array.of_list lc_).(i)) *)
+  (* done; *)
+  let template = match ind.mind_arity with
+    | RegularArity _ -> false
+    | TemplateArity _ -> true
+  in
+  let ind_ = {
+      mind_entry_typename = name_m;
+      mind_entry_arity = arity;
+      mind_entry_template = template;
+      mind_entry_consnames = consnames_m;
+      mind_entry_lc = List.rev lc_
+    } in      
+  (sigma, ind_ :: acc)
+
+let modal_translate_ind_mind modal ind ids =
+  let open Declarations in
+  let open Entries in
+  let env = Global.env () in
+  let sigma = Evd.from_env env in
+
+  let (mib,_) = Global.lookup_inductive ind in
+  let substind =
+    Array.map_to_list (fun oib -> (oib.mind_typename, None,
+				   Inductive.type_of_inductive env ((mib, oib), Univ.Instance.empty)))
+		      mib.mind_packets
+  in
+  let invsubst = List.map pi1 substind in
+  let translator = add_translator !translator (List.map (fun id -> VarRef id, VarRef id) invsubst) in
+  let fctx = { MTranslate.modal = modal; MTranslate.translator = translator } in
+
+  let packets = mib.mind_packets in
+  let params = mib.mind_params_ctxt in
+  let params_m,sigma = MTranslate.translate_context env fctx sigma params in
+  let sigma,packets_m = Array.fold_right (modal_translate_ind_one modal env ids substind invsubst params_m) packets (sigma,[]) in
+
+
+  let record = match mib.mind_record with
+  | None -> None
+  | Some None -> Some None
+  | Some (Some (id, _, _)) -> Some (Some (translate_name id))
+  in
+  
+  (* let debug b = *)
+  (*   msg_info (Nameops.pr_id b.mind_entry_typename ++ str " : " ++ Termops.print_constr (it_mkProd_or_LetIn b.mind_entry_arity params_m)); *)
+  (*   let cs = List.combine b.mind_entry_consnames b.mind_entry_lc in *)
+  (*   let pr_constructor (id, tpe) = *)
+  (*     msg_info (Nameops.pr_id id ++ str " : " ++ Termops.print_constr tpe) *)
+  (*   in *)
+  (*   List.iter pr_constructor cs *)
+  (* in *)
+  (* List.iter debug packets_m; *)
+  
+  let make_param = function
+  | (na, None, t) -> (Nameops.out_name na, LocalAssum t)
+  | (na, Some body, _) -> (Nameops.out_name na, LocalDef body)
+  in
+  let params_ = List.map make_param params_m in
+  let (_, uctx) = Evd.universe_context sigma in
+  let mib_m = {
+      mind_entry_record = record;
+      mind_entry_finite = mib.mind_finite;
+      mind_entry_params = params_;
+      mind_entry_inds = packets_m;
+      mind_entry_polymorphic = mib.mind_polymorphic;
+      mind_entry_universes = uctx;
+      mind_entry_private = mib.mind_private
+    } in
+  let (_, kn), _ = Declare.declare_mind mib_m in
+  let mib_ = Global.mind_of_delta_kn kn in
+  let map_data gr = match gr with
+  | IndRef (mib, i) -> (gr, IndRef (mib_, i))
+  | ConstructRef ((mib, i), j) -> (gr, ConstructRef ((mib_, i), j))
+  | _ -> assert false
+  in
+  List.map map_data (get_mind_globrefs (fst ind))
+
+  
+    
+
 let modal_translate_ind modal ind ids =
-  [IndRef ind, IndRef ind]
+  modal_translate_ind_mind modal ind ids
+  (* [IndRef ind, IndRef ind] *)
 
 let modal_translate (reflector, eta, univ, univ_to_univ, forall, unit, path) gr ids =
   let r = gr in
