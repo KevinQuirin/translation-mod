@@ -78,22 +78,25 @@ let modal_translate_constant modal cst ids =
     | Some _ -> error "Not the right number of provided names"
   in
   (** Translate the type *)
-  let typ, _ = Universes.type_of_global (ConstRef cst) in
   let env = Global.env () in
   let sigma = Evd.from_env env in
+  let sigma, cstu = Evd.fresh_constant_instance env sigma cst in
+  let poly = Environ.polymorphic_pconstant cstu env in
+  let body = Environ.constant_value_in env cstu in
+  let typ = Environ.constant_type_in env cstu in
+  let typ = Typeops.type_of_constant_type env typ in
   let fctx = { MTranslate.modal = modal; MTranslate.translator = !translator } in
   let (typ,sigma) = MTranslate.translate_type env fctx sigma typ in
   let sigma, _ = Typing.type_of env sigma typ in
   let _uctx = Evd.evar_universe_context sigma in
   (** Define the term by tactic *)
-  let body = Option.get (Global.body_of_constant cst) in
   let (body, sigma) = MTranslate.translate env fctx sigma body in
   msg_info (Termops.print_constr body);
   let evdref = ref sigma in
   let () = Typing.check env evdref body typ in
   let sigma = !evdref in
   let (_, uctx) = Evd.universe_context sigma in
-  let ce = Declare.definition_entry ~types:typ ~univs:uctx body in
+  let ce = Declare.definition_entry ~poly ~types:typ ~univs:uctx body in
   let cd = Entries.DefinitionEntry ce in
   let decl = (cd, IsProof Lemma) in
   let cst_ = Declare.declare_constant id decl in
@@ -342,6 +345,7 @@ let modal_implement (reflector, eta, univ, univ_to_univ, forall, unit, path) id 
   let hook ctx = Lemmas.mk_hook hook in
   (* let sigma, univtouniv = Evarutil.new_global sigma univ_to_univ in *)
   (* let typ_ = mkApp (univtouniv, [|typ_|]) in *)
+  let () = msg_info (Printer.pr_constr typ_) in
   let sigma, _ = Typing.type_of env sigma typ_ in
   let () = Lemmas.start_proof_univs id_ kind sigma typ_ hook in
   ()

@@ -1,4 +1,4 @@
-(* -*- coq-prog-name: "/Users/kquiri13/Code/Coq/HoTT8.5/HoTT/hoqtop"; proof-prog-name-ask: nil -*- *)
+(* -*- coq-prog-name: "/Users/kquiri13/Code/Coq/HoTT8.5/HoTT/hoqtop"; proof-prog-name-ask: nil; coq-prog-args: bt -*- *)
 
 Require Import MTranslate.Modal.
 Require Import HoTT.
@@ -30,29 +30,33 @@ Set Primitive Projections.
 (*   exact true. *)
 (* Defined. *)
 
-Module Test (Mod:Modalities) (Acc:Accessible_Modalities Mod).
-  Export Mod.
-  Module Export Acc_Theory := Accessible_Modalities_Theory Mod Acc.
-  Module Export Lex_Theory := Lex_Modalities_Theory Mod.
-  Module Export AccLex_Theory := Accessible_Lex_Modalities_Theory Mod Acc.
-  Module Export Mod_ReflectiveSubuniverses
-  := Modalities_to_ReflectiveSubuniverses Mod.
-  Module Export RSU
-    := ReflectiveSubuniverses_Theory Mod_ReflectiveSubuniverses.
+Module Test.
+  Export ClT.
+
+  (* Module Export Acc_Theory := Accessible_Modalities_Theory ClM . *)
+  (* Module Export Lex_Theory := Lex_Modalities_Theory Mod. *)
+  (* Module Export AccLex_Theory := Accessible_Lex_Modalities_Theory Mod Acc. *)
+  (* Module Export Mod_ReflectiveSubuniverses *)
+  (* := Modalities_to_ReflectiveSubuniverses Mod. *)
+  (* Module Export RSU *)
+  (*   := ReflectiveSubuniverses_Theory Mod_ReflectiveSubuniverses. *)
   
-  Context `{lex: forall O:Modality, Lex O}.
+  (* Context `{lex: forall O:Modality, Lex O}. *)
   Context `{ua: Univalence}.
   Context `{fs: Funext}.
 
   Context {O:Modality}.
-  Let Reflector  := fun X => (O_reflector O X; @O_inO O X).
-  Let Eta := fun X a => to O X a.
-  Let TypeO := ((Type_ O; inO_typeO O): Type_ O).
-  Let U2U  := (pr1:Type_ O -> Type).
-  Let Forall  := (fun (A:Type_ O) (B:A.1 -> Type_ O) =>
-                                ((forall x:A.1, (B x).1; inO_forall O A.1 (pr1 o B) (pr2 o B))): Type_ O).
-  Let OUnit := ((Unit; inO_unit O) : Type_ O).
-  Let OPath := (fun (A:Type_ O) (x y:A) => (x = y; inO_paths O A.1 x y)).
+  Definition Reflector  := fun X:Type2le@{i a}
+                           => (O_reflector@{u a i} O X; @O_inO@{u a i} O X).
+  Definition Eta := fun X a => to O X a.
+  Definition TypeO := ((Type_@{u a j i} O; inO_typeO O): Type_@{u a k j} O).
+  Definition U2U  := (pr1:Type_@{u a j i} O -> Type@{j}).
+  Definition Forall  := (fun (A:Type_@{u a j i} O@{u a}) (B:A.1 -> Type_@{u a j i} O@{u a}) =>
+                           ((forall x:A.1, (B x).1; inO_forall O@{u a} A.1 (pr1 o B) (pr2 o B))): Type_@{u a j i} O@{u a}).
+  Definition OUnit := (((Unit: Type@{i}); inO_unit O) : Type_@{u a j i} O).
+  Definition OPath := (fun (A:Type_ O) (x y:A) => (x = y; inO_paths O A.1 x y)).
+
+  Modal Definition foo : forall (f:Type -> Type), f Unit using Reflector Eta TypeO U2U Forall OUnit OPath.
   
   Ltac _modal X id :=
     modal Reflector Eta TypeO U2U Forall OUnit X OPath as id.
@@ -62,113 +66,48 @@ Module Test (Mod:Modalities) (Acc:Accessible_Modalities Mod).
 
   (* Set Printing Universes. *)
 
-  Definition X := tt : Unit.
-  
-  Modal Translate Bool using Reflector Eta TypeO U2U Forall OUnit OPath.
+  (* Bug1: Modal Translate pour les constantes *)
+  Definition U1 := Type : Type.
+  Modal Translate U1 using Reflector Eta TypeO U2U Forall OUnit OPath.
 
-  Inductive foo : Type :=
-  |zero : foo
-  |suc : Unit ->  foo.
-      
-
-  Modal Translate foo using Reflector Eta TypeO U2U Forall OUnit OPath.
+  (* Bug2: Pourquoi ça ne marche pas ? *)
+  (* Let t := idpath : ((fun _ => TypeO) OUnit).1 = Type_ O. *)
+  (* Set Debug Unification. *)
+  (* Set Debug Tactic Unification. *)
+  (* Set Printing Universes. *)
+  (* Check (let x := TypeO in let y := TypeO in  *)
+  (*  (Forall (Forall TypeO (fun _ : U2U _ => TypeO)) *)
+  (*     (fun f : U2U (Forall TypeO (fun _ : U2U _ => x)) => *)
+  (*      OUnit : y.1))). *)
   
-  
-  Modal Translate sum using Reflector Eta TypeO U2U Forall OUnit OPath.
 
-  Modal Definition negb : Bool -> Bool using Reflector Eta TypeO U2U Forall OUnit OPath.
+cbn.  
+Admitted.
+Modal Translate Bool using Reflector Eta TypeO U2U Forall OUnit OPath.
+
+  Definition Bool_m_rec (P:Type) (Pt: P) (Pf: P)
+    : Bool_m -> P
+    := fun b =>
+         match b with
+         |true_m => Pt
+         |false_m => Pf
+         end.
+
+  (* Bug3: Conversion test raised an anomaly *)
+  Modal Definition negb_m : Bool -> Bool using Reflector Eta TypeO U2U Forall OUnit OPath.
   Proof.
     cbn.
     refine (O_functor _ _).
     
-    
-    exact negb.
-  Defined.
+    exact (Bool_m_rec Bool_m false_m true_m).
+
+  (* Bug 4: Modal Translate pour les inductifs avec paramètres *)
+  (* Modal Translate sum using Reflector Eta TypeO U2U Forall OUnit OPath. *)
+  (* Modal Translate pour nat *)
+
+  Definition foo := forall A, A -> A.
+  Modal Translate foo using Reflector Eta TypeO U2U Forall OUnit OPath.
   
-  Modal Definition sum : forall (A B:Type), Type using Reflector Eta TypeO U2U Forall OUnit OPath.
-  Proof.
-    cbn.
-    intros A B.
-    refine (A -> B; _).
-    apply inO_forall. exact fs.
-    exact _.
-  Defined.
-
-  Modal Definition nat_rec : forall P : Type, P -> (nat -> P -> P) -> nat -> P using Reflector Eta TypeO U2U Forall OUnit OPath.
-  Proof.
-    intros P p f.
-    cbn in *.
-    refine (O_rec _).
-    intro n; induction n.
-    exact p. 
-    exact (f (to O nat n) IHn).
-  Defined.
-
-  Modal Definition negb : Bool -> Bool using Reflector Eta TypeO U2U Forall OUnit OPath.
-  Proof.
-    cbn.
-    refine (O_functor _ _). exact negb.
-  Defined.
   
-  Modal Definition foo : negb true = false using Reflector Eta TypeO U2U Forall OUnit OPath.
-  Proof.
-    cbn. unfold negbmodal.
-    unfold O_functor, Eta. cbn.
-    simple refine (O_rec_beta _ _).
-  Defined.
-
-  Inductive sum_ (A B:TypeO) : Type :=
-  |inl_ : A.1 -> sum_ A B
-  |inr_ : B.1 -> sum_ A B.
-
-  Modal Definition sum : forall (A B:Type), Type using Reflector Eta TypeO U2U Forall OUnit OPath.
-  Proof.
-    cbn.
-    intros A B. refine (O (sum_ A B); _).
-    apply O_inO.
-  Defined.
+  Modal Translate nat using Reflector Eta TypeO U2U Forall OUnit OPath.
   
-  Modal Definition inl : forall (A B:Type), A -> sum A B using Reflector Eta TypeO U2U Forall OUnit OPath.
-  Proof.
-    cbn. intros A B x.
-    apply Eta. apply inl_. exact x.
-  Defined.
-
-  Context (X:Type).
-
-    Modal Definition foo : X using Reflector Eta TypeO U2U Forall OUnit OPath.
-  
-    
-    unfold U2U, Forall, OUnit, OPath, Eta. cbn.
-  Defined.
-
-  Print foomodal.
-  (* Goal forall (O:Modality) (A:Type) (x:A), True. *)
-  (*   intros O A x.        *)
-  (*   _modal O Empty Oempty. cbn in *. *)
-  (*   __modal O Unit. cbn in *. *)
-  (*   __modal O nat. cbn in *. *)
-  (*   __modal O Type. *)
-  (*   __modal O (Type -> Type). cbn in *.  *)
-  (*   __modal O (forall x:Type, x). cbn in *. *)
-  (*   (* __modal O (forall x:Type, x -> x). *)  *)
-  (*   (* __modal O ((fun x:Type => x) Type). *) *)
-  (*   (* __modal O (forall x:Type, Type -> x). *) *)
-  (*   (* __modal O ((fun x:Type => x) Type). *) *)
-  (* Abort. *)
-
-
-
-  
-  (* Set Printing All. *)
-  (* Set Printing Universes. *)
-  Polymorphic Modal Definition foo :Type using Reflector TypeO U2U Forall OUnit.
-    unfold TypeO, U2U, MType. cbn.
-    apply OUnit.
-  Qed.
-Check foomodal.  (*
-    Anomaly: File "pretyping/evd.ml", line 407, characters 15-21: Assertion failed.
-    Please report.
-   *)
-  Abort.
-        

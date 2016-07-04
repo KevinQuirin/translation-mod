@@ -8,8 +8,8 @@ open Pp
 let trunc_array a n = Array.sub a 0 n
   
 
-let eta_expand_fun f t = 
-  let f_ = mkApp (Vars.lift 1 f, [|mkRel 0|]) in
+let eta_expand_fun f t =
+  let f_ = mkApp (Vars.lift 1 f, [|mkRel 1|]) in
   mkLambda(Anonymous,t,f_)
 
 (* let rec is_a_type t = *)
@@ -77,11 +77,8 @@ let rec translate env fctx sigma c =
   match kind_of_term c with
   | Rel n ->
      (mkRel n, sigma)
-  (* assert false *)
   | Var id ->
      apply_global env sigma (VarRef id) Univ.Instance.empty fctx
-     (* (mkVar id, sigma) *)
-  (* assert false *)
   | Sort s ->
      let (sigma, s') =
        if Sorts.is_prop s then (sigma, Sorts.prop)
@@ -97,23 +94,22 @@ let rec translate env fctx sigma c =
   | Prod (na, t, u) ->
      let (mt, sigma) = (translate env fctx sigma t) in (* Translation of t *)
      let (mt1, sigma) = (translate_type env fctx sigma t) in (* Translation of t *)
-     let (mu, sigma) = (translate env fctx sigma u) in (* Translation of u *)
+     let (mu, sigma) = (translate (push_rel (na,None,t) env) fctx sigma u) in (* Translation of u *)
      let sigma, modall = Evarutil.new_global sigma modal.mod_forall in
      (mkApp (modall, [| mt ; mkLambda (na, mt1, mu) |]), sigma)
   | Lambda (na, t, u) ->
      let (mt,sigma) = (translate_type env fctx sigma t) in (* Translation of t *)
-     let (mu,sigma) = (translate env fctx sigma u) in (* Translation of u *)
+     let (mu,sigma) = (translate (push_rel (na,None,t) env) fctx sigma u) in (* Translation of u *)
      (mkLambda (na,mt,mu), sigma)
-  (* assert false *)
   | LetIn (na, c, t, u) ->
      (* mkLetIn (na, translate env c, translate env t, translate env u) *)
      assert false
   | App (t,args) when isInd t -> (* e.g. @paths A *)
      let ((ind,i),k) = destInd t in
      translate_ind env fctx sigma ind i k args
-  | App (t,args) when isConstruct t -> (* e.g. @idpath A a *)
-     let (((ind,i),j),k) = destConstruct t in
-     translate_construct modal env fctx sigma ind i j k args
+  (* | App (t,args) when isConstruct t -> (\* e.g. @idpath A a *\) *)
+     (* let (((ind,i),j),k) = destConstruct t in *)
+     (* translate_construct modal env fctx sigma ind i j k args *)
   | App (t, args) ->
      let (mt,sigma) = (translate env fctx sigma t) in (* Translation of t *)
      let f u sigma = translate env fctx sigma u in
@@ -124,7 +120,8 @@ let rec translate env fctx sigma c =
   | Ind ((ind,i),k) ->
      translate_ind env fctx sigma ind i k [||]
   | Construct (((ind,i), u), k) ->
-     translate_construct modal env fctx sigma ind i u k [||]
+     apply_global env sigma (ConstructRef ((ind,i),u)) k fctx
+     (* translate_construct modal env fctx sigma ind i u k [||] *)
   | Case (ci, c, r, p) -> assert false
   | Fix f -> assert false
   | CoFix f -> assert false
@@ -178,49 +175,49 @@ and translate_ind env fctx sigma ind i k args =
     (oind_,sigma)
     
 	
-and translate_construct modal env fctx sigma ind i j k args =
-  let mib, oib = Inductive.lookup_mind_specif env (ind,i) in
-  let name = Id.to_string oib.mind_typename in
-  let n = mib.mind_nparams_rec in
-  (* Pp.msg_info (Pp.str ("Inductive "^name^" has "^(string_of_int n)^" params")); *)
-  if ("Unit" = name) then
-    (mkConstructU (((ind,i),j),k), sigma)
-  else if ("paths" = name) then
-    match args with
-    |[||] ->
-      let (sigma, s) = Evd.new_sort_variable Evd.univ_flexible sigma in
-      let sigma, moduniv = Evarutil.new_global sigma modal.mod_univ in
-      let sigma, modunivtouniv = Evarutil.new_global sigma modal.mod_univ_to_univ in
-      translate env fctx sigma (eta_expand_fun (mkConstructU (((ind,i),j),k)) (mkSort(s)))
-    |[|ty|] ->
-      let mty,sigma = translate env fctx sigma ty in
-      let sigma, moduniv = Evarutil.new_global sigma modal.mod_univ_to_univ in
-      let mty = mkApp (moduniv, [|mty|]) in
-      (mkApp (mkConstructU (((ind,i),j),k), [|mty|]), sigma)
-    |[|ty;te|] ->
-      let mty,sigma = translate env fctx sigma ty in
-      let mte,sigma = translate env fctx sigma te in
-      let sigma, moduniv = Evarutil.new_global sigma modal.mod_univ_to_univ in
-      let mty = mkApp (moduniv, [|mty|]) in
-      (mkApp (mkConstructU (((ind,i),j),k), [|mty;mte|]), sigma)
-    |_ -> assert false
-  else
-    let f u sigma =
-      let sigma, g = is_a_type env sigma u in
-      if g then
-	let sigma, modunivtouniv = Evarutil.new_global sigma modal.mod_univ_to_univ in
-	let uu,sigma = translate env fctx sigma u in
-	(mkApp (modunivtouniv, [|uu|]), sigma)
-      else
-	translate env fctx sigma u in
-    let (margs,sigma) = CArray.fold_map' f args sigma in
-    let constr = mkConstructU (((ind,i),j),k) in
-    let mconstr = mkApp (constr, margs) in
-    let sigma, modeta = Evarutil.new_global sigma modal.mod_eta in
-    let margs = Array.sub margs 0 n in
-    let mind = mkApp (mkIndU ((ind,i),k), margs) in
-    (mkApp(modeta, [|mind; mconstr|]),sigma)
-      (* TODO : This only works if the constructor is evaluated with as many arguments as possible, e.g. translating [inl] won't work, but translating [inl A B] will *)
+(* and translate_construct modal env fctx sigma ind i j k args = *)
+(*   let mib, oib = Inductive.lookup_mind_specif env (ind,i) in *)
+(*   let name = Id.to_string oib.mind_typename in *)
+(*   let n = mib.mind_nparams_rec in *)
+(*   (\* Pp.msg_info (Pp.str ("Inductive "^name^" has "^(string_of_int n)^" params")); *\) *)
+(*   if ("Unit" = name) then *)
+(*     (mkConstructU (((ind,i),j),k), sigma) *)
+(*   else if ("paths" = name) then *)
+(*     match args with *)
+(*     |[||] -> *)
+(*       let (sigma, s) = Evd.new_sort_variable Evd.univ_flexible sigma in *)
+(*       let sigma, moduniv = Evarutil.new_global sigma modal.mod_univ in *)
+(*       let sigma, modunivtouniv = Evarutil.new_global sigma modal.mod_univ_to_univ in *)
+(*       translate env fctx sigma (eta_expand_fun (mkConstructU (((ind,i),j),k)) (mkSort(s))) *)
+(*     |[|ty|] -> *)
+(*       let mty,sigma = translate env fctx sigma ty in *)
+(*       let sigma, moduniv = Evarutil.new_global sigma modal.mod_univ_to_univ in *)
+(*       let mty = mkApp (moduniv, [|mty|]) in *)
+(*       (mkApp (mkConstructU (((ind,i),j),k), [|mty|]), sigma) *)
+(*     |[|ty;te|] -> *)
+(*       let mty,sigma = translate env fctx sigma ty in *)
+(*       let mte,sigma = translate env fctx sigma te in *)
+(*       let sigma, moduniv = Evarutil.new_global sigma modal.mod_univ_to_univ in *)
+(*       let mty = mkApp (moduniv, [|mty|]) in *)
+(*       (mkApp (mkConstructU (((ind,i),j),k), [|mty;mte|]), sigma) *)
+(*     |_ -> assert false *)
+(*   else *)
+(*     let f u sigma = *)
+(*       let sigma, g = is_a_type env sigma u in *)
+(*       if g then *)
+(* 	let sigma, modunivtouniv = Evarutil.new_global sigma modal.mod_univ_to_univ in *)
+(* 	let uu,sigma = translate env fctx sigma u in *)
+(* 	(mkApp (modunivtouniv, [|uu|]), sigma) *)
+(*       else *)
+(* 	translate env fctx sigma u in *)
+(*     let (margs,sigma) = CArray.fold_map' f args sigma in *)
+(*     let constr = mkConstructU (((ind,i),j),k) in *)
+(*     let mconstr = mkApp (constr, margs) in *)
+(*     let sigma, modeta = Evarutil.new_global sigma modal.mod_eta in *)
+(*     let margs = Array.sub margs 0 n in *)
+(*     let mind = mkApp (mkIndU ((ind,i),k), margs) in *)
+(*     (mkApp(modeta, [|mind; mconstr|]),sigma) *)
+(*       (\* TODO : This only works if the constructor is evaluated with as many arguments as possible, e.g. translating [inl] won't work, but translating [inl A B] will *\) *)
 
   
 let translate_context env fctx sigma ctx =
@@ -231,6 +228,7 @@ let translate_context env fctx sigma ctx =
     | Some _ -> assert false
     in
     (* let (ext, tfctx) = extend fctx in *)
+    let env = push_rel (na,body,t) env in
     let (t_, sigma) = translate_type env fctx sigma t in
     (* let t_ = it_mkProd_or_LetIn t_ ext in *)
     let decl_ = (na, body_, t_) in
