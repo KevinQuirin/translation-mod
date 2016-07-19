@@ -13,6 +13,10 @@ open Proofview.Notations
 let translate_name id =
   let id = Id.to_string id in
   Id.of_string (id^"ᶠ" )
+
+let translate_name_ind id =
+  let id = Id.to_string id in
+  Id.of_string (id^"_modind" )
 	       
 (* (\** Record of translation between globals *\) *)
 
@@ -91,7 +95,7 @@ let modal_translate_constant modal cst ids =
   let _uctx = Evd.evar_universe_context sigma in
   (** Define the term by tactic *)
   let (body, sigma) = MTranslate.translate env fctx sigma body in
-  msg_info (Termops.print_constr body);
+  (* msg_info (Termops.print_constr body); *)
   let evdref = ref sigma in
   let () = Typing.check env evdref body typ in
   let sigma = !evdref in
@@ -132,134 +136,163 @@ let get_mind_globrefs mind =
   let l = List.mapi map (Array.to_list mib.mind_packets) in
   List.flatten l
 
-let modal_translate_ind_one modal env ids substind invsubst params ind (sigma,acc) =
-  let fctx = { MTranslate.modal = modal; MTranslate.translator = !translator } in
-  let open Declarations in
-  let open Entries in
-  let (sigma, s) =
-    if List.mem Sorts.InType ind.mind_kelim then Evarutil.new_Type env sigma
-    else (sigma, mkProp)
-  in
-  let nparams = List.length params in
-  let (sigma, arity) =
-    (** On obtient l'arité de l'inductif en traduisant le type de chaque indice
-          i.e : si I ... : (i1 : A1),...,(in : An),s alors l'arité traduite 
-          est (i1 : [A1])...(in : [An]), s *)
-    let nindexes = List.length ind.mind_arity_ctxt - nparams in
-    let ctx = List.firstn nindexes ind.mind_arity_ctxt in
-    let env' = Environ.push_rel_context params env in
-    let a = it_mkProd_or_LetIn s ctx in
-    let (a,sigma) = MTranslate.translate_type env' fctx sigma a in
-    (** En traduisant le type, le codomaine a aussi été traduit. On le remplace par le codomaine
-          originel *)
-    let (a, _) = decompose_prod_n nindexes a in 
-    (sigma, compose_prod a s)
-  in
-  let typename = ind.mind_typename in
-  let consnames = ind.mind_consnames in
-  let translate_names id =
-    let id = Id.to_string id in
-    Id.of_string (id^"_m" )
-  in
-  let name_m, consnames_m = match ids with
-    | None ->
-       (translate_names typename, CArray.map_to_list translate_names consnames)
-    | Some ids when List.length ids = Array.length consnames + 1 ->
-       (List.hd ids, List.tl ids)
-    | _ ->
-       error "Not the right number of provided names"
-  in
-  let user_lc = ind.mind_user_lc in
-  (* for i=0 to (Array.length user_lc -1) do *)
-    (* msg_info (Termops.print_constr user_lc.(i)) *)
-  (* done; *)
-  let fold_lc (sigma, lc_) typ =
-    let (u,sigma) = MTranslate.translate env fctx sigma typ in
-    (sigma, u :: lc_)
-    
-    (* let typ_,s = decompose_prod typ in *)
-    (* let typ_ = Array.of_list typ_ in *)
-    (* let f (x,u) sigma = *)
-    (*   let (u,sigma) = MTranslate.translate_type env fctx sigma u in *)
-    (*   ((x,u),sigma) *)
-    (* in *)
-    (* let (typ_,sigma) = CArray.fold_map' f typ_ sigma in *)
-    (* let typ_ = Array.to_list typ_ in *)
-    (* let typ_ = compose_prod typ_ s in *)
-    (* (sigma, typ_ :: lc_) *)
-  in
-  let (sigma, lc_) = Array.fold_left fold_lc (sigma, []) user_lc in
+let eta_reduce c =
+  let rec aux c =
+    match kind_of_term c with
+    | Lambda (n, t, b) ->
+       let rec eta b =
+	 match kind_of_term b with
+	 | App (f, args) ->
+	    if isRelN 1 (Array.last args) then
+	      let args', _ = Array.chop (Array.length args - 1) args in
+	      if Array.for_all (Vars.noccurn 1) args' then Vars.subst1 mkProp (mkApp (f, args'))
+	      else let b' = aux b in if Term.eq_constr b b' then c else eta b'
+	    else let b' = aux b in if Term.eq_constr b b' then c else eta b'
+	 | _ -> let b' = aux b in
+	    if Term.eq_constr b' b then c else eta b'
+       in eta b
+    | _ -> map_constr aux c
+  in aux c
 
-  (* for i=0 to (Array.length (Array.of_list lc_) -1) do *)
-    (* msg_info (Termops.print_constr (Array.of_list lc_).(i)) *)
-  (* done; *)
-  let template = match ind.mind_arity with
-    | RegularArity _ -> false
-    | TemplateArity _ -> true
-  in
-  let ind_ = {
-      mind_entry_typename = name_m;
-      mind_entry_arity = arity;
-      mind_entry_template = template;
-      mind_entry_consnames = consnames_m;
-      mind_entry_lc = List.rev lc_
-    } in      
-  (sigma, ind_ :: acc)
 
 let modal_translate_ind_mind modal ind ids =
   let open Declarations in
   let open Entries in
   let env = Global.env () in
   let sigma = Evd.from_env env in
-
-  let (mib,_) = Global.lookup_inductive ind in
+  let sigma, (indu,k) = Evd.fresh_inductive_instance env sigma ind in
+  let poly = Environ.polymorphic_pind (indu,k) env in
+  let (mib,_) = Global.lookup_inductive indu in
+  let nparams = List.length mib.mind_params_ctxt in
   let substind =
     Array.map_to_list (fun oib -> (oib.mind_typename, None,
-				   Inductive.type_of_inductive env ((mib, oib), Univ.Instance.empty)))
+				   Inductive.type_of_inductive env ((mib, oib), k)))
 		      mib.mind_packets
   in
   let invsubst = List.map pi1 substind in
   let translator = add_translator !translator (List.map (fun id -> VarRef id, VarRef id) invsubst) in
   let fctx = { MTranslate.modal = modal; MTranslate.translator = translator } in
 
-  let packets = mib.mind_packets in
-  let params = mib.mind_params_ctxt in
-  let params_m,sigma = MTranslate.translate_context env fctx sigma params in
-  let sigma,packets_m = Array.fold_right (modal_translate_ind_one modal env ids substind invsubst params_m) packets (sigma,[]) in
+  let (sigma, substfn) = 
+    let fn_oib oib = 
+      let narityctxt = List.length oib.mind_arity_ctxt in
+      let args = Array.init (narityctxt) (fun i -> mkRel (narityctxt - i)) in
+      let fnbody = mkApp (mkVar oib.mind_typename, args) in
+      (* let obj = cat.FTranslate.cat_obj in *)
+      let fold (sigma, ctxt) (x, o, t_) =
+        let (tr_t_,sigma) = MTranslate.translate_type env fctx sigma t_ in
+        (sigma, (x, o, tr_t_) :: ctxt)
+      in
+      let (sigma, tr_arity) = List.fold_left fold (sigma, []) oib.mind_arity_ctxt in
+      (sigma, it_mkLambda_or_LetIn fnbody (
+				     (* [(Anonymous, None, FTranslate.hom cat (mkRel 3) (mkRel (3 + narityctxt))); (Anonymous, None, obj)] @ *)
+				       tr_arity
+				       (* @ [(Anonymous, None, obj)]) *)
+      ))
+    in
+    let fold (sigma, acc) oib =
+      let (sigma, fn) = fn_oib oib in
+      (sigma, (oib.mind_typename, fn) :: acc)
+    in
+    Array.fold_left fold (sigma, []) mib.mind_packets
+  in
 
+  let make_one_entry params body (sigma, bodies_) =
+    let template = match body.mind_arity with
+      | RegularArity _ -> false
+      | TemplateArity _ -> true
+    in
+    let (sigma, s) =
+      if List.mem Sorts.InType body.mind_kelim then Evarutil.new_Type env sigma
+      else (sigma, mkProp)
+    in
+    
+    let (sigma, arity) =
+      (** On obtient l'arité de l'inductif en traduisant le type de chaque indice
+          i.e : si I ... : (i1 : A1),...,(in : An),s alors l'arité traduite 
+          est (i1 : [A1])...(in : [An]), s *)
+      let nindexes = List.length body.mind_arity_ctxt - nparams in
+      let ctx = List.firstn nindexes body.mind_arity_ctxt in
+      let env' = Environ.push_rel_context mib.mind_params_ctxt env in
+      let a = it_mkProd_or_LetIn s ctx in
+      let (a,sigma) = MTranslate.translate_type env' fctx sigma a in
+      (** En traduisant le type, le codomaine a aussi été traduit. On le remplace par le codomaine
+          originel *)
+      let (a, _) = decompose_prod_n nindexes a in
+      (sigma, compose_prod a s)
+    in
+    let fold_lc (sigma, lc_) typ =
+      (** We exploit the fact that the translation actually does not depend on
+          the rel_context of the environment except for its length. *)
+      let env' = Environ.push_named_context substind env in
+      let envtr = Environ.push_rel_context params env' in
+      let _, typ = decompose_prod_n nparams typ in
+      let typ = Vars.substnl (List.map mkVar invsubst) nparams typ in
+      let (p,typ) = decompose_prod typ in
+      let f u sigma =
+	let foo,sigma =  MTranslate.translate_type envtr fctx sigma (snd u) in
+	((fst u, foo),sigma)
+      in
+      let (p_,sigma) = CArray.fold_map' f (Array.of_list p) sigma in
+      let (typ_, sigma) = MTranslate.translate_type envtr fctx sigma typ in
+      let typ_ = compose_prod (Array.to_list p_) typ_ in 
+      let typ_ = Vars.replace_vars substfn typ_ in 
+      let typ_ = Reductionops.nf_beta Evd.empty typ_ in
+      let typ_ = Vars.substn_vars (List.length params + 1) invsubst typ_ in
+      let envtyp_ = Environ.push_rel_context [Name (Nameops.add_suffix body.mind_typename "_f"),None,
+					      it_mkProd_or_LetIn arity params] env in
+      let envtyp_ = Environ.push_rel_context params envtyp_ in
+      let sigma, ty = Typing.type_of envtyp_ sigma typ_ in                             
+      let sigma, b = Reductionops.infer_conv ~pb:Reduction.CUMUL envtyp_ sigma ty s in
+      (sigma, eta_reduce typ_ :: lc_)
+    in
+
+    let typename, consnames = match ids with
+    | None ->
+      (translate_name_ind body.mind_typename, CArray.map_to_list translate_name_ind body.mind_consnames)
+    | Some ids when List.length ids = Array.length body.mind_consnames + 1 ->
+      (List.hd ids, List.tl ids)
+    | _ ->
+      error "Not the right number of provided names"
+    in
+    let (sigma, lc_) = Array.fold_left fold_lc (sigma, []) body.mind_user_lc in
+
+    let body_ = {
+      mind_entry_typename = typename;
+      mind_entry_arity = arity;
+      mind_entry_template = template;
+      mind_entry_consnames = consnames;
+      mind_entry_lc = List.rev lc_;
+    } in
+    (sigma, body_ :: bodies_)
+  in
 
   let record = match mib.mind_record with
   | None -> None
   | Some None -> Some None
-  | Some (Some (id, _, _)) -> Some (Some (translate_name id))
+  | Some (Some (id, _, _)) -> Some (Some (translate_name_ind id))
   in
-  
-  (* let debug b = *)
-  (*   msg_info (Nameops.pr_id b.mind_entry_typename ++ str " : " ++ Termops.print_constr (it_mkProd_or_LetIn b.mind_entry_arity params_m)); *)
-  (*   let cs = List.combine b.mind_entry_consnames b.mind_entry_lc in *)
-  (*   let pr_constructor (id, tpe) = *)
-  (*     msg_info (Nameops.pr_id id ++ str " : " ++ Termops.print_constr tpe) *)
-  (*   in *)
-  (*   List.iter pr_constructor cs *)
-  (* in *)
-  (* List.iter debug packets_m; *)
+  let params = mib.mind_params_ctxt in
+  let params_,sigma = MTranslate.translate_context env fctx sigma params in    
+  let bodies = mib.mind_packets in
+  let sigma,bodies_ = Array.fold_right (make_one_entry params_) bodies (sigma,[]) in
   
   let make_param = function
   | (na, None, t) -> (Nameops.out_name na, LocalAssum t)
   | (na, Some body, _) -> (Nameops.out_name na, LocalDef body)
   in
-  let params_ = List.map make_param params_m in
+  let params_ = List.map make_param params_ in
   let (_, uctx) = Evd.universe_context sigma in
-  let mib_m = {
+  let mib_ = {
       mind_entry_record = record;
       mind_entry_finite = mib.mind_finite;
       mind_entry_params = params_;
-      mind_entry_inds = packets_m;
+      mind_entry_inds = bodies_;
       mind_entry_polymorphic = mib.mind_polymorphic;
       mind_entry_universes = uctx;
       mind_entry_private = mib.mind_private
     } in
-  let (_, kn), _ = Declare.declare_mind mib_m in
+  let (_, kn), _ = Declare.declare_mind mib_ in
   let mib_ = Global.mind_of_delta_kn kn in
   let map_data gr = match gr with
   | IndRef (mib, i) -> (gr, IndRef (mib_, i))
@@ -345,9 +378,10 @@ let modal_implement (reflector, eta, univ, univ_to_univ, forall, unit, path) id 
   let hook ctx = Lemmas.mk_hook hook in
   (* let sigma, univtouniv = Evarutil.new_global sigma univ_to_univ in *)
   (* let typ_ = mkApp (univtouniv, [|typ_|]) in *)
-  let () = msg_info (Printer.pr_constr typ_) in
+  (* let () = msg_info (Printer.pr_constr typ_) in *)
   let sigma, _ = Typing.type_of env sigma typ_ in
   let () = Lemmas.start_proof_univs id_ kind sigma typ_ hook in
+              (* let _ = msg_info (Pp.str "Foo") in *)
   ()
 
 (** Error handling *)

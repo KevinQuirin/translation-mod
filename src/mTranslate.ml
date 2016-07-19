@@ -11,6 +11,7 @@ let trunc_array a n = Array.sub a 0 n
 let eta_expand_fun f t =
   let f_ = mkApp (Vars.lift 1 f, [|mkRel 1|]) in
   mkLambda(Anonymous,t,f_)
+  
 
 (* let rec is_a_type t = *)
 (*   match kind_of_term t with *)
@@ -130,15 +131,19 @@ let rec translate env fctx sigma c =
   | Evar _ -> assert false
 
 and translate_type env fctx sigma t =
-  let modal = fctx.modal in
-  let (mt,sigma) = translate env fctx sigma t in
-  let sigma, modunivtouniv = Evarutil.new_global sigma modal.mod_univ_to_univ in
-  let mt = mkApp(modunivtouniv, [|mt|]) in (* π1 mt *) 
-  (mt,sigma)
+  match kind_of_term t with
+  |Rel n -> (t,sigma)
+  |Var id -> (t,sigma)
+  |_ ->
+    let modal = fctx.modal in
+    let (mt,sigma) = translate env fctx sigma t in
+    let sigma, modunivtouniv = Evarutil.new_global sigma modal.mod_univ_to_univ in
+    let mt = mkApp(modunivtouniv, [|mt|]) in (* π1 mt *) 
+    (mt,sigma)
 
 and translate_ind env fctx sigma ind i k args =
   let modal = fctx.modal in
-  let _, oib = Inductive.lookup_mind_specif env (ind,i) in
+  let mib, oib = Inductive.lookup_mind_specif env (ind,i) in
   let name = Id.to_string oib.mind_typename in
   (* Case Unit, translated to Unit *)
   if ("Unit" = name) then
@@ -166,14 +171,20 @@ and translate_ind env fctx sigma ind i k args =
     (mind,sigma)
   (* Else, we just apply O, and translate recursively *)
   else
-    let ind_ = get_inductive fctx (ind,i) in
-    let f u sigma = translate env fctx sigma u in
-    let (margs,sigma) = CArray.fold_map' f args sigma in
-    let ind_ = mkApp(mkIndU (ind_,k), margs) in
-    let sigma, modo = Evarutil.new_global sigma modal.mod_O in
-    let oind_ = mkApp(modo, [|ind_|]) in
-    (oind_,sigma)
-    
+    let nparams = List.length mib.mind_params_ctxt in
+    if (Array.length args == nparams)
+    then 
+      let ind_ = get_inductive fctx (ind,i) in
+      let f u sigma = translate env fctx sigma u in
+      let (margs,sigma) = CArray.fold_map' f args sigma in
+      let ind_ = mkApp(mkIndU (ind_,k), margs) in
+      let sigma, modo = Evarutil.new_global sigma modal.mod_O in
+      let oind_ = mkApp(modo, [|ind_|]) in
+      (oind_,sigma)
+    else
+      let a1 = args.(0) in
+      let sigma,t = Typing.type_of env sigma a1 in
+      translate env fctx sigma (eta_expand_fun (mkApp ((mkIndU ((ind,i),k)), args)) t)
 	
 (* and translate_construct modal env fctx sigma ind i j k args = *)
 (*   let mib, oib = Inductive.lookup_mind_specif env (ind,i) in *)
