@@ -5,28 +5,16 @@ open Environ
 open Globnames
 open Pp
 
-let trunc_array a n = Array.sub a 0 n
+let isConstruct_ c ind =
+  match kind_of_term c with
+  |Construct ((ind',j),k) ->
+    Constr.equal ind (mkIndU(ind',k))
+  |_ -> false
   
 
 let eta_expand_fun f t =
   let f_ = mkApp (Vars.lift 1 f, [|mkRel 1|]) in
   mkLambda(Anonymous,t,f_)
-  
-
-(* let rec is_a_type t = *)
-(*   match kind_of_term t with *)
-(*   |Sort _ -> true *)
-(*   |Cast (c,_,_) -> is_a_type c *)
-(*   |Prod _ -> true *)
-(*   |LetIn(_,_,_,c) -> is_a_type c *)
-(*   |App (f,args) -> ( *)
-(*     match kind_of_term f with *)
-(*     |Lambda (_,_,c) -> is_a_type c *)
-(*     |_ -> false *)
-(*   ) *)
-(*   |Ind _ -> true *)
-(*   |_ -> false *)
-	      
 
 let is_a_type env sigma t =
   let sigma, tt = Typing.type_of env sigma t in
@@ -38,6 +26,7 @@ type modality = {
     mod_univ : global_reference;
     mod_univ_to_univ : global_reference;
     mod_forall : global_reference;
+    mod_sig : global_reference;
     mod_unit : global_reference;
     mod_paths : global_reference;
   }
@@ -62,6 +51,16 @@ let get_inductive fctx ind =
   | IndRef ind_ -> ind_
   | _ -> assert false
 
+let get_construct fctx constr =  
+  let gr = ConstructRef constr in
+  let gr_ =
+    try Refmap.find gr fctx.translator
+    with Not_found -> raise (MissingGlobal gr)
+  in
+  match gr_ with
+  | ConstructRef constr_ -> constr_
+  | _ -> assert false
+
 let apply_global env sigma gr u fctx =
   (** FIXME *)
   let p' =
@@ -81,11 +80,6 @@ let rec translate env fctx sigma c =
   | Var id ->
      apply_global env sigma (VarRef id) Univ.Instance.empty fctx
   | Sort s ->
-     let (sigma, s') =
-       if Sorts.is_prop s then (sigma, Sorts.prop)
-       else Evd.new_sort_variable Evd.univ_flexible sigma
-     in
-     let sigma = Evd.set_leq_sort env sigma s s' in
      let sigma, moduniv = Evarutil.new_global sigma modal.mod_univ in
      (moduniv, sigma)
   | Cast (c, k, t) ->
@@ -103,14 +97,16 @@ let rec translate env fctx sigma c =
      let (mu,sigma) = (translate (push_rel (na,None,t) env) fctx sigma u) in (* Translation of u *)
      (mkLambda (na,mt,mu), sigma)
   | LetIn (na, c, t, u) ->
-     (* mkLetIn (na, translate env c, translate env t, translate env u) *)
-     assert false
+     let mc, sigma = translate env fctx sigma c in
+     let mt, sigma = translate_type env fctx sigma t in
+     let mu, sigma = translate env fctx sigma u in
+     (mkLetIn (na, mc, mt, mu), sigma)
   | App (t,args) when isInd t -> (* e.g. @paths A *)
      let ((ind,i),k) = destInd t in
      translate_ind env fctx sigma ind i k args
-  (* | App (t,args) when isConstruct t -> (\* e.g. @idpath A a *\) *)
-     (* let (((ind,i),j),k) = destConstruct t in *)
-     (* translate_construct modal env fctx sigma ind i j k args *)
+  | App (t,args) when isConstruct t -> (* e.g. @idpath A a *)
+     let (((ind,i),j),k) = destConstruct t in
+     translate_construct modal env fctx sigma ind i j k args
   | App (t, args) ->
      let (mt,sigma) = (translate env fctx sigma t) in (* Translation of t *)
      let f u sigma = translate env fctx sigma u in
@@ -121,8 +117,8 @@ let rec translate env fctx sigma c =
   | Ind ((ind,i),k) ->
      translate_ind env fctx sigma ind i k [||]
   | Construct (((ind,i), u), k) ->
-     apply_global env sigma (ConstructRef ((ind,i),u)) k fctx
-     (* translate_construct modal env fctx sigma ind i u k [||] *)
+     (* apply_global env sigma (ConstructRef ((ind,i),u)) k fctx *)
+     translate_construct modal env fctx sigma ind i u k [||]
   | Case (ci, c, r, p) -> assert false
   | Fix f -> assert false
   | CoFix f -> assert false
@@ -131,16 +127,13 @@ let rec translate env fctx sigma c =
   | Evar _ -> assert false
 
 and translate_type env fctx sigma t =
-  match kind_of_term t with
-  |Rel n -> (t,sigma)
-  |Var id -> (t,sigma)
-  |_ ->
-    let modal = fctx.modal in
-    let (mt,sigma) = translate env fctx sigma t in
-    let sigma, modunivtouniv = Evarutil.new_global sigma modal.mod_univ_to_univ in
-    let mt = mkApp(modunivtouniv, [|mt|]) in (* π1 mt *) 
-    (mt,sigma)
-
+  let modal = fctx.modal in
+  let (mt,sigma) = translate env fctx sigma t in
+  let sigma, modunivtouniv = Evarutil.new_global sigma modal.mod_univ_to_univ in
+  let mt = mkApp(modunivtouniv, [|mt|]) in (* π1 mt *)
+  let sigma, _ = Typing.type_of env sigma mt in
+  (mt,sigma)
+    
 and translate_ind env fctx sigma ind i k args =
   let modal = fctx.modal in
   let mib, oib = Inductive.lookup_mind_specif env (ind,i) in
@@ -155,8 +148,7 @@ and translate_ind env fctx sigma ind i k args =
     (* FIXME *)
     |[||] -> assert false
     |[|ty|] -> assert false
-    |[|ty;te|] ->
-      translate env fctx sigma (eta_expand_fun (mkApp (mkIndU ((ind,i),k), [|ty;te|])) ty)
+    |[|ty;te|] -> assert false
     |[|ty;te1;te2|] ->
       let f u sigma = translate env fctx sigma u in
       let (margs,sigma) = CArray.fold_map' f args sigma in
@@ -164,11 +156,17 @@ and translate_ind env fctx sigma ind i k args =
       (mkApp(modpaths, margs), sigma)
     |_ -> assert false
   else if ("sig" = name) then
-    let f u sigma = translate env fctx sigma u in
-    let (margs,sigma) = CArray.fold_map' f args sigma in
-    let mind = mkApp (mkIndU ((ind,i),k), margs) in
-    (*TODO: Add here a mkApp sig_O [|mind|] *)
-    (mind,sigma)
+    match args with
+    |[||] -> assert false
+    |[|ty|] -> assert false
+    |[|ty;tp|] ->
+      let f u sigma = translate env fctx sigma u in
+      let (margs,sigma) = CArray.fold_map' f args sigma in
+      let sigma, modsig = Evarutil.new_global sigma modal.mod_sig in
+      (mkApp (modsig, margs),sigma)
+    |_ -> assert false
+
+
   (* Else, we just apply O, and translate recursively *)
   else
     let nparams = List.length mib.mind_params_ctxt in
@@ -177,7 +175,8 @@ and translate_ind env fctx sigma ind i k args =
       let ind_ = get_inductive fctx (ind,i) in
       let f u sigma = translate env fctx sigma u in
       let (margs,sigma) = CArray.fold_map' f args sigma in
-      let ind_ = mkApp(mkIndU (ind_,k), margs) in
+      let (sigma, pi) = Evd.fresh_inductive_instance env sigma ind_ in
+      let ind_ = mkApp(mkIndU pi, margs) in
       let sigma, modo = Evarutil.new_global sigma modal.mod_O in
       let oind_ = mkApp(modo, [|ind_|]) in
       (oind_,sigma)
@@ -186,49 +185,87 @@ and translate_ind env fctx sigma ind i k args =
       let sigma,t = Typing.type_of env sigma a1 in
       translate env fctx sigma (eta_expand_fun (mkApp ((mkIndU ((ind,i),k)), args)) t)
 	
-(* and translate_construct modal env fctx sigma ind i j k args = *)
-(*   let mib, oib = Inductive.lookup_mind_specif env (ind,i) in *)
-(*   let name = Id.to_string oib.mind_typename in *)
-(*   let n = mib.mind_nparams_rec in *)
-(*   (\* Pp.msg_info (Pp.str ("Inductive "^name^" has "^(string_of_int n)^" params")); *\) *)
-(*   if ("Unit" = name) then *)
-(*     (mkConstructU (((ind,i),j),k), sigma) *)
-(*   else if ("paths" = name) then *)
-(*     match args with *)
-(*     |[||] -> *)
-(*       let (sigma, s) = Evd.new_sort_variable Evd.univ_flexible sigma in *)
-(*       let sigma, moduniv = Evarutil.new_global sigma modal.mod_univ in *)
-(*       let sigma, modunivtouniv = Evarutil.new_global sigma modal.mod_univ_to_univ in *)
-(*       translate env fctx sigma (eta_expand_fun (mkConstructU (((ind,i),j),k)) (mkSort(s))) *)
-(*     |[|ty|] -> *)
-(*       let mty,sigma = translate env fctx sigma ty in *)
-(*       let sigma, moduniv = Evarutil.new_global sigma modal.mod_univ_to_univ in *)
-(*       let mty = mkApp (moduniv, [|mty|]) in *)
-(*       (mkApp (mkConstructU (((ind,i),j),k), [|mty|]), sigma) *)
-(*     |[|ty;te|] -> *)
-(*       let mty,sigma = translate env fctx sigma ty in *)
-(*       let mte,sigma = translate env fctx sigma te in *)
-(*       let sigma, moduniv = Evarutil.new_global sigma modal.mod_univ_to_univ in *)
-(*       let mty = mkApp (moduniv, [|mty|]) in *)
-(*       (mkApp (mkConstructU (((ind,i),j),k), [|mty;mte|]), sigma) *)
-(*     |_ -> assert false *)
-(*   else *)
-(*     let f u sigma = *)
-(*       let sigma, g = is_a_type env sigma u in *)
-(*       if g then *)
-(* 	let sigma, modunivtouniv = Evarutil.new_global sigma modal.mod_univ_to_univ in *)
-(* 	let uu,sigma = translate env fctx sigma u in *)
-(* 	(mkApp (modunivtouniv, [|uu|]), sigma) *)
-(*       else *)
-(* 	translate env fctx sigma u in *)
-(*     let (margs,sigma) = CArray.fold_map' f args sigma in *)
-(*     let constr = mkConstructU (((ind,i),j),k) in *)
-(*     let mconstr = mkApp (constr, margs) in *)
-(*     let sigma, modeta = Evarutil.new_global sigma modal.mod_eta in *)
-(*     let margs = Array.sub margs 0 n in *)
-(*     let mind = mkApp (mkIndU ((ind,i),k), margs) in *)
-(*     (mkApp(modeta, [|mind; mconstr|]),sigma) *)
-(*       (\* TODO : This only works if the constructor is evaluated with as many arguments as possible, e.g. translating [inl] won't work, but translating [inl A B] will *\) *)
+and translate_construct modal env fctx sigma ind i j k args =
+  let mib, oib = Inductive.lookup_mind_specif env (ind,i) in
+  let name = Id.to_string oib.mind_typename in
+  let n = mib.mind_nparams_rec in
+  if ("Unit" = name) then
+    (mkConstructU (((ind,i),j),k), sigma)
+  else if ("paths" = name) then
+    match args with
+    |[||] ->
+      let (sigma, s) = Evd.new_sort_variable Evd.univ_flexible sigma in
+      let sigma, moduniv = Evarutil.new_global sigma modal.mod_univ in
+      let sigma, modunivtouniv = Evarutil.new_global sigma modal.mod_univ_to_univ in
+      translate env fctx sigma (eta_expand_fun (mkConstructU (((ind,i),j),k)) (mkSort(s)))
+    |[|ty|] ->
+      let mty,sigma = translate env fctx sigma ty in
+      let sigma, moduniv = Evarutil.new_global sigma modal.mod_univ_to_univ in
+      let mty = mkApp (moduniv, [|mty|]) in
+      (mkApp (mkConstructU (((ind,i),j),k), [|mty|]), sigma)
+    |[|ty;te|] ->
+      let mty,sigma = translate_type env fctx sigma ty in
+      let mte,sigma = translate env fctx sigma te in
+      (* let sigma, moduniv = Evarutil.new_global sigma modal.mod_univ_to_univ in *)
+      (* let mty = mkApp (moduniv, [|mty|]) in *)
+      (mkApp (mkConstructU (((ind,i),j),k), [|mty;mte|]), sigma)
+    |_ -> assert false
+  else if ("sig" = name) then
+    match args with
+    |[||] -> assert false
+    |[|ty|] -> assert false
+    |[|ty;tp|] -> assert false
+    |[|ty;tp;tx|] -> assert false
+    |[|ty;tp;tx1;tx2|] ->
+      let mtp,sigma =
+      	match kind_of_term tp with
+      	|Lambda(x,t,u) ->
+      	  let mt,sigma = translate_type env fctx sigma t in
+      	  let mu,sigma = translate_type env fctx sigma u in
+      	  (mkLambda(x,mt,mu),sigma)
+	|_ -> assert false
+      in
+      let mty,sigma = translate_type env fctx sigma ty in
+      (* let mtp,sigma = translate env fctx sigma tp in *)
+      let mtx1,sigma = translate env fctx sigma tx1 in
+      let mtx2,sigma = translate env fctx sigma tx2 in
+      (mkApp (mkConstructU (((ind,i),j),k), [|mty;mtp;mtx1;mtx2|]),sigma)
+    |_ -> assert false
+  else
+    let nparams = List.length mib.mind_params_ctxt + oib.mind_consnrealargs.(j-1) in
+    if (Array.length args == nparams)
+    then
+      let ind_ = get_inductive fctx (ind,i) in
+      let f u sigma = translate env fctx sigma u in
+      let (margs,sigma) = CArray.fold_map' f args sigma in
+      let (sigma, pind) = Evd.fresh_inductive_instance env sigma ind_ in
+      let ind_ = mkApp(mkIndU pind, Array.sub margs 0 (List.length mib.mind_params_ctxt)) in
+      msg_info (Printer.pr_constr ind_);
+      let constr_ = get_construct fctx ((ind,i),j) in
+      let f u sigma =
+	(* match kind_of_term u with *)
+	(* |Construct (((ind,i),j'),k) -> *)
+	(*   let u_ = get_construct fctx ((ind,i),j') in *)
+	(*   (\* let (sigma, pi) = Evd.fresh_constructor_instance env sigma u_ in *\) *)
+	(*   (mkConstructU (u_,k) , sigma) *)
+	(* |_ -> *)
+	  translate env fctx sigma u in
+      let (margs,sigma) = CArray.fold_map' f margs sigma in
+      let (sigma, pi) = Evd.fresh_constructor_instance env sigma constr_ in
+      let constr_ = mkApp(mkConstructU pi, args) in
+      msg_info (Printer.pr_constr constr_);
+      let sigma, eta = Evarutil.new_global sigma modal.mod_eta in
+      let oconstr_ = mkApp(eta, [|ind_; constr_ |]) in
+      msg_info (Printer.pr_constr oconstr_);
+      (oconstr_,sigma)
+    else
+      let a1 = args.(0) in
+      let sigma,t = Typing.type_of env sigma a1 in
+      translate env fctx sigma (eta_expand_fun (mkApp ((mkConstructU (((ind,i),j),k)), args)) t)
+
+    
+    (* apply_global env sigma (ConstructRef ((ind,i),j)) k fctx *)
+    
 
   
 let translate_context env fctx sigma ctx =
@@ -238,14 +275,10 @@ let translate_context env fctx sigma ctx =
     | None -> (sigma, None)
     | Some _ -> assert false
     in
-    (* let (ext, tfctx) = extend fctx in *)
     let env = push_rel (na,body,t) env in
     let (t_, sigma) = translate_type env fctx sigma t in
-    (* let t_ = it_mkProd_or_LetIn t_ ext in *)
     let decl_ = (na, body_, t_) in
-    (* let fctx = add_variable fctx in *)
     (sigma, fctx, decl_ :: ctx_)
   in
-  (* let init = if toplevel then [pos_name, None, cat.cat_obj] else [] in *)
   let (sigma, _, ctx_) = List.fold_right fold ctx (sigma, fctx, []) in
   (ctx_, sigma)

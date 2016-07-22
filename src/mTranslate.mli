@@ -6,6 +6,7 @@ type modality = {
     mod_univ : global_reference;
     mod_univ_to_univ : global_reference;
     mod_forall : global_reference;
+    mod_sig : global_reference;
     mod_unit : global_reference;
     mod_paths : global_reference;
   }
